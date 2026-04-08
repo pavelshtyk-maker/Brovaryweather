@@ -132,3 +132,21 @@ while True:
 
     time.sleep(10)
     
+def check_messages():
+    url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+    data = requests.get(url).json()
+
+    if "result" not in data:
+        return
+
+    for item in data["result"]:
+        if "message" in item:
+            chat_id = item["message"]["chat"]["id"]
+            text = item["message"].get("text", "")
+
+            if text == "/start":
+                send("👋 Бот працює!\n\nЯ буду надсилати:\n🌦️ прогноз на завтра о 21:00\n🌧️ попередження про дощ\n\nВсе автоматично 😎")
+
+            if text == "/now":
+                send("⏳ Оновлюю погоду...")
+                
