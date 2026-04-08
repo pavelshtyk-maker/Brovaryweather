@@ -114,6 +114,8 @@ def send_daily():
     send(text)
     last_daily_sent = datetime.date.today()
 
+send("🔥 ТЕСТ: бот працює!")
+
 while True:
     now = datetime.datetime.now()
     data = get_forecast()
