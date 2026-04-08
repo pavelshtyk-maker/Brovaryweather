@@ -117,7 +117,6 @@ def send_daily():
 while True:
     now = datetime.datetime.now()
     data = get_forecast()
-    check_messages()
     
     if now.hour == 21 and now.minute == 0:
         if last_daily_sent != now.date():
