@@ -4,12 +4,12 @@ import datetime
 import pytz
 import os
 
-# --- ENV ---
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 API_KEY = os.getenv("API_KEY")
 
-# --- SEND ---
+kyiv = pytz.timezone('Europe/Kyiv')
+
 def send(text, keyboard=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
@@ -24,176 +24,162 @@ def send(text, keyboard=None):
 
     requests.post(url, json=data)
 
-
-# --- КНОПКИ ---
 def main_menu():
     return {
         "keyboard": [
-            ["🌤 Зараз", "📅 Завтра"],
-            ["🔄 Оновити"]
+            ["🌤 Сьогодні", "📅 Завтра"]
         ],
         "resize_keyboard": True
     }
 
-
-# --- ПОГОДА ---
 def get_weather():
     url = f"https://api.openweathermap.org/data/2.5/forecast?q=Brovary&appid={API_KEY}&units=metric&lang=ua"
     return requests.get(url).json()
 
+def group_by_day(data):
+    days = {}
 
-# --- ЗАРАЗ ---
-def weather_now():
-    data = get_weather()
+    for t in data["list"]:
+        dt = datetime.datetime.strptime(t["dt_txt"], "%Y-%m-%d %H:%M:%S")
+        dt = kyiv.localize(dt)
+        day = dt.date()
 
-    temp = round(data["list"][0]["main"]["temp"])
-    desc = data["list"][0]["weather"][0]["description"]
-    wind = round(data["list"][0]["wind"]["speed"])
+        if day not in days:
+            days[day] = []
 
-    text = (
-        f"🌤 <b>Зараз:</b>\n"
-        f"🌡 {temp}°C\n"
-        f"🌥 {desc}\n"
-        f"💨 {wind} м/с"
-    )
+        days[day].append((dt, t))
 
-    send(text, main_menu())
+    return days
 
+def format_day(day_data):
+    result = ""
 
-# --- ЗАВТРА ---
-def weather_tomorrow():
-    data = get_weather()
-    result = "📅 <b>Завтра погодинно:</b>\n\n"
+    parts = {
+        "🌙 Ніч": [],
+        "🌅 Ранок": [],
+        "☀️ День": [],
+        "🌇 Вечір": []
+    }
 
-    for i in range(8, 16):
-        t = data["list"][i]
-
-        time_txt = t["dt_txt"][11:16]
+    for dt, t in day_data:
+        hour = dt.hour
         temp = round(t["main"]["temp"])
         rain = int(t.get("pop", 0) * 100)
 
-        result += f"{time_txt} | {temp}°C | 🌧 {rain}%\n"
+        row = f"{dt.strftime('%H:%M')} | {temp}°C | 🌧 {rain}%"
 
-    result += ai_advice(data)
+        if 0 <= hour < 6:
+            parts["🌙 Ніч"].append(row)
+        elif 6 <= hour < 12:
+            parts["🌅 Ранок"].append(row)
+        elif 12 <= hour < 18:
+            parts["☀️ День"].append(row)
+        else:
+            parts["🌇 Вечір"].append(row)
 
-    send(result, main_menu())
+    for part, rows in parts.items():
+        if rows:
+            result += f"\n<b>{part}</b>\n"
+            result += "\n".join(rows) + "\n"
 
+    return result
 
-# --- AI АНАЛІЗ ---
-def ai_advice(data):
-    text = "\n🧠 <b>AI аналіз:</b>\n"
+def ai_advice(day_data):
+    rain_hours = sum(1 for _, t in day_data if t.get("pop", 0) > 0.3)
+    max_temp = max(t["main"]["temp"] for _, t in day_data)
+    min_temp = min(t["main"]["temp"] for _, t in day_data)
 
-    rain_detected = False
-    wind_detected = False
+    advice = "\n🧠 <b>AI аналіз:</b>\n"
 
-    for i in range(0, 10):
-        rain = int(data["list"][i].get("pop", 0) * 100)
-        wind = data["list"][i]["wind"]["speed"]
-
-        if rain > 30:
-            rain_detected = True
-
-        if wind > 10:
-            wind_detected = True
-
-    if rain_detected:
-        text += "☔ Можливий дощ — візьми парасолю\n"
+    if rain_hours > 2:
+        advice += "🌧 Ймовірний дощ — візьми парасолю\n"
+    elif rain_hours > 0:
+        advice += "🌦 Можливий короткий дощ\n"
     else:
-        text += "☀️ Без опадів — можна гуляти\n"
+        advice += "☀️ Без опадів\n"
 
-    if wind_detected:
-        text += "💨 Сильний вітер\n"
+    if max_temp < 5:
+        advice += "🧥 Холодно — одягайся тепліше\n"
+    elif max_temp > 25:
+        advice += "🔥 Спека — пий воду\n"
 
-    return text
+    return advice
 
+def today_weather():
+    data = get_weather()
+    days = group_by_day(data)
 
-# --- PUSH ДОЩ ---
-last_rain_alert = None
+    today = datetime.datetime.now(kyiv).date()
+
+    if today in days:
+        text = "🌤 <b>Сьогодні:</b>\n"
+        text += format_day(days[today])
+        text += ai_advice(days[today])
+        send(text, main_menu())
+
+def tomorrow_weather():
+    data = get_weather()
+    days = group_by_day(data)
+
+    tomorrow = (datetime.datetime.now(kyiv) + datetime.timedelta(days=1)).date()
+
+    if tomorrow in days:
+        text = "📅 <b>Завтра:</b>\n"
+        text += format_day(days[tomorrow])
+        text += ai_advice(days[tomorrow])
+        send(text, main_menu())
 
 def rain_alert(data):
-    global last_rain_alert
+    now = datetime.datetime.now(kyiv)
 
-    for i in range(0, 3):
-        rain = int(data["list"][i].get("pop", 0) * 100)
+    for t in data["list"]:
+        dt = datetime.datetime.strptime(t["dt_txt"], "%Y-%m-%d %H:%M:%S")
+        dt = kyiv.localize(dt)
 
-        if rain > 50:
-            now_hour = datetime.datetime.now().hour
+        if 0 < (dt - now).total_seconds() < 3600:
+            rain = int(t.get("pop", 0) * 100)
 
-            if last_rain_alert != now_hour:
-                send("🌧 Дощ скоро (~1-2 години)")
-                last_rain_alert = now_hour
-            return
+            if rain > 50:
+                send(f"⚠️ Дощ скоро (~{dt.strftime('%H:%M')}) 🌧 {rain}%")
+                return
 
+def handle_updates(offset):
+    url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}"
+    r = requests.get(url).json()
 
-# --- ОБРОБКА КОМАНД ---
-last_update_id = None
+    for u in r["result"]:
+        offset = u["update_id"] + 1
 
-def check_messages():
-    global last_update_id
-
-    url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-    data = requests.get(url).json()
-
-    if "result" not in data:
-        return
-
-    for item in data["result"]:
-        update_id = item["update_id"]
-
-        if last_update_id is not None and update_id <= last_update_id:
-            continue
-
-        last_update_id = update_id
-
-        if "message" in item:
-            text = item["message"].get("text", "")
+        if "message" in u:
+            text = u["message"].get("text", "")
 
             if text == "/start":
-                send("👋 Бот погоди Бровари\n\nОбери дію:", main_menu())
+                send("👋 Привіт! Обери:", main_menu())
 
-            elif text == "🌤 Зараз":
-                weather_now()
+            elif "Сьогодні" in text:
+                today_weather()
 
-            elif text == "📅 Завтра":
-                weather_tomorrow()
+            elif "Завтра" in text:
+                tomorrow_weather()
 
-            elif text == "🔄 Оновити":
-                weather_now()
+    return offset
 
+offset = 0
+last_21 = None
 
-# --- TIMEZONE ---
-kyiv = pytz.timezone('Europe/Kyiv')
-
-last_morning = None
-last_evening = None
-
-
-# --- MAIN LOOP ---
 while True:
     now = datetime.datetime.now(kyiv)
-    data = get_weather()
 
-    check_messages()
+    offset = handle_updates(offset)
 
-    # 🌅 08:00
-    if now.hour == 8 and now.minute == 0:
-        if last_morning != now.date():
-            send("🌅 Доброго ранку!\n\nПрогноз на сьогодні:")
-            weather_now()
-            last_morning = now.date()
-            time.sleep(60)
-
-    # 🌙 21:00
+    # пуш о 21:00
     if now.hour == 21 and now.minute == 0:
-        if last_evening != now.date():
-            send("🌙 Прогноз на завтра:")
-            weather_tomorrow()
-            last_evening = now.date()
-            time.sleep(60)
+        if last_21 != now.date():
+            tomorrow_weather()
+            last_21 = now.date()
 
-    # 🌧 перевірка дощу
-    if now.minute % 10 == 0:
-        rain_alert(data)
-        time.sleep(60)
+    # попередження про дощ
+    data = get_weather()
+    rain_alert(data)
 
-    time.sleep(10)
+    time.sleep(30)
