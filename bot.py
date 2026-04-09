@@ -3,9 +3,9 @@ import time
 import datetime
 import pytz
 
-TOKEN = "ТВОЙ_TOKEN"
+TOKEN = "8676276831:AAFvIynKcTuDJIGh3ECodbRwyrHiUafoun8"
 CHAT_ID = "444719451"
-API_KEY = "ТВОЙ_API_KEY"
+API_KEY = "205645dc67432b673ce5e96c06d4911f"
 
 def send(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
